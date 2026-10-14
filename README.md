@@ -25,10 +25,16 @@ This repository provides full technical specifications, reverse-engineered memor
   - [5.4 Edit UI Strings](#54-edit-ui-strings)
   - [5.5 Edit Bitmaps & Icons](#55-edit-bitmaps--icons)
   - [5.6 Pack & Rebuild](#56-pack--rebuild)
-- [6. Flashing Guide](#6-flashing-guide)
+  - [5.7 Drop & Sync Media](#57-drop--sync-media)
+- [6. Drop-and-Play Media Engine (Add Songs Without iTunes)](#6-drop-and-play-media-engine-add-songs-without-itunes)
+  - [6.1 How It Works](#61-how-it-works)
+  - [6.2 Workflow & Usage](#62-workflow--usage)
+  - [6.3 On-Device Portable AutoSync](#63-on-device-portable-autosync)
+  - [6.4 Supported Audio Formats & Tags](#64-supported-audio-formats--tags)
+- [7. Flashing Guide](#7-flashing-guide)
   - [Method 1: Direct Partition Write with `dd` (Recommended)](#method-1-direct-partition-write-with-dd-recommended)
   - [Method 2: iTunes / Finder Restore](#method-2-itunes--finder-restore)
-- [7. Repository Structure](#7-repository-structure)
+- [8. Repository Structure](#8-repository-structure)
 
 ---
 
@@ -233,9 +239,78 @@ This recomputes all 32-bit checksums, updates directory headers at `0x4200`, and
 - `unpacked_fw/firmware_partition.bin` (Raw partition image for `dd`)
 - `custom_iPod_25.1.3.ipsw` (Complete update archive for iTunes/Finder)
 
+### 5.7 Drop & Sync Media
+```bash
+# Sync an iPod mounted at /media/user/IPOD (or E: on Windows)
+./ipod_tool.py sync /media/user/IPOD
+
+# Move loose files into iPod_Control/Music shards instead of copying
+./ipod_tool.py sync /media/user/IPOD --move
+
+# Preview files that would be indexed without writing to disk
+./ipod_tool.py sync /media/user/IPOD --dry-run
+```
+
 ---
 
-## 6. Flashing Guide
+## 6. Drop-and-Play Media Engine (Add Songs Without iTunes)
+
+In stock Apple iPod firmware, dropping music files onto the iPod filesystem does **not** make them visible in the Music menu because the OS kernel exclusively reads a compiled binary database located at `/iPod_Control/iTunes/iTunesDB`.
+
+We reverse-engineered the entire `iTunesDB` binary format and implemented a **100% pure-Python, zero-dependency engine** (`ipod_indexer.py` / `ipod_tool.py sync`). It allows you to drag-and-drop your audio files directly to the iPod as a standard USB flash drive from any operating system (Linux, macOS, Windows) and have them instantly playable on the stock firmware!
+
+### 6.1 How It Works
+1. **Drop Anywhere**: Put music files (.mp3, .m4a, .wav) into a `Music/` folder or anywhere on your iPod storage. Subfolders (e.g. `Music/Rock/`, `Music/Queen/`) are automatically imported as playlists.
+2. **Metadata Extraction**: Built-in pure Python parsers extract:
+   - **MP3**: ID3v2.2, ID3v2.3, ID3v2.4 (UTF-8, UTF-16, ISO-8859-1), ID3v1 fallback, and MPEG audio frame headers for duration & bitrate.
+   - **M4A / AAC / ALAC**: MP4 atom box tree (`moov/udta/meta/ilst`) extracting `@nam` (Title), `@ART` (Artist), `@alb` (Album), `gnre` / `@gen` (Genre), `trkn` (Track/Total), and `©day` (Year).
+   - **WAV**: RIFF/WAVE header parsing for PCM sample rate, channels, and duration.
+   - **Playlists**: `.m3u` / `.m3u8` playlist files are automatically parsed into iPod playlists.
+3. **Directory Sharding**: Loose files are automatically organized and sharded into FAT32 directories `iPod_Control/Music/F00` through `F49` to prevent FAT32 directory table performance degradation on the iPod hard drive.
+4. **Binary `iTunesDB` Generation**: Generates compliant Apple database atoms:
+   - `mhbd`: Root database header (version 25 / `0x19`, platform 2 = Windows FAT32).
+   - `mhsd` Dataset 1: Track list (`mhlt` containing 624-byte `mhit` track descriptors and `mhod` string records for Title, iPod colon path, Album, Artist, Genre, and Encoding type).
+   - `mhsd` Dataset 2: Playlist list (`mhlp` containing `mhyp` playlist records and `mhip` track index pointers).
+   - Zero-filled `Play Counts` and valid `iPod_Control/Device/SysInfo` to prevent reset loops.
+
+> [!NOTE]
+> **No Cryptographic Hash Required**: While 6th Gen Classic and 3rd+ Gen Nano introduced cryptographic database hashing (Hash58/Hash72), the iPod Video 5.5G (PP5022A) accepts unhashed `iTunesDB` files directly, making this pure-Python implementation 100% native and permanent.
+
+### 6.2 Workflow & Usage
+
+#### Option A: Run from your Computer
+```bash
+# Simply pass the iPod drive mount point
+./ipod_tool.py sync /media/user/IPOD
+```
+
+#### Option B: Standalone / Portable Execution
+You can also run `ipod_indexer.py` directly without `ipod_tool.py`:
+```bash
+python3 ipod_indexer.py /media/user/IPOD
+```
+
+### 6.3 On-Device Portable AutoSync
+When you run `sync` for the first time, `ipod_tool.py` automatically installs a standalone `AutoSync.py` onto the root of your iPod!
+- Whenever you plug your iPod into *any* computer (Linux, Windows, macOS):
+  1. Drag your songs into the iPod's `Music` folder.
+  2. Double-click or run:
+     ```bash
+     python3 AutoSync.py
+     ```
+  3. Safely eject. All songs are immediately available in the iPod Music menu!
+
+### 6.4 Supported Audio Formats & Tags
+| Format | Extension | Codec Compatibility | Tag Extraction Support |
+| :--- | :--- | :--- | :--- |
+| **MP3** | `.mp3` | MPEG-1/2 Audio Layer III (up to 320 kbps) | ID3v2.2, ID3v2.3, ID3v2.4, ID3v1 |
+| **AAC** | `.m4a`, `.aac` | Advanced Audio Coding (LC-AAC up to 320 kbps) | MP4 `moov/udta/meta/ilst` |
+| **Apple Lossless** | `.m4a`, `.alac`| 16-bit 44.1kHz ALAC lossless audio | MP4 `moov/udta/meta/ilst` |
+| **WAV** | `.wav` | Uncompressed PCM stereo 16-bit | RIFF/WAVE header chunk |
+
+---
+
+## 7. Flashing Guide
 
 ### Method 1: Direct Partition Write with `dd` (Recommended)
 This method is the cleanest and most reliable way to flash custom firmware directly to the iPod without relying on iTunes.
@@ -271,10 +346,11 @@ This method is the cleanest and most reliable way to flash custom firmware direc
 
 ---
 
-## 7. Repository Structure
+## 8. Repository Structure
 
 ```
 ├── ipod_tool.py               # Complete unpacking, patching, and rebuilding CLI tool
+├── ipod_indexer.py            # Standalone zero-dependency Drop & Sync iTunesDB engine
 ├── iPod_25.1.3.ipsw           # Stock Apple iPod Video 5.5G Firmware 1.3
 ├── iPodDocumentation_25.1.3.ipd # Stock Apple iPod documentation package
 ├── rea_evidence.json          # REA formal analysis evidence bundle

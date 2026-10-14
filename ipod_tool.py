@@ -12,6 +12,11 @@ import zipfile
 import shutil
 import argparse
 
+try:
+    import ipod_indexer
+except ImportError:
+    ipod_indexer = None
+
 # Constants for iPod Video 5.5G (PP5022A / Firmware-25.6.3)
 APPLE_STOP_SIGN = b"{{~~  /-----\\   {{~~ /       \\  {{~~|         | {{~~| S T O P | {{~~|         | {{~~ \\       /  {{~~  \\-----/   Copyright(C) 2001 Apple Computer, Inc.---------------------------------------------------------------------------------------------------------"
 IH_MAGIC = b"]ih["
@@ -562,6 +567,13 @@ def main():
     p_pack.add_argument("unpacked_dir", help="Directory containing unpacked firmware components")
     p_pack.add_argument("-o", "--out", default="custom_iPod_25.1.3.ipsw", help="Output IPSW path")
     
+    # sync
+    p_sync = subparsers.add_parser("sync", help="Drop & Sync music directory to iPod FAT32 drive without iTunes")
+    p_sync.add_argument("ipod_root", nargs="?", default=".", help="Root mount directory of the iPod storage (default: current directory)")
+    p_sync.add_argument("--drop-dir", action="append", help="Specific directories to scan for loose music (can specify multiple)")
+    p_sync.add_argument("--move", action="store_true", help="Move loose files into iPod_Control/Music instead of copying")
+    p_sync.add_argument("--dry-run", action="store_true", help="Scan and preview without writing files")
+    
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -583,6 +595,11 @@ def main():
             uncap_volume(args.osos, args.out)
     elif args.command == "pack":
         pack_firmware(args.unpacked_dir, args.out)
+    elif args.command == "sync":
+        if ipod_indexer is None:
+            print("[-] Error: ipod_indexer.py not found in the current directory.")
+            sys.exit(1)
+        ipod_indexer.sync_ipod(args.ipod_root, drop_dirs=args.drop_dir, move_files=args.move, dry_run=args.dry_run)
 
 if __name__ == "__main__":
     main()
