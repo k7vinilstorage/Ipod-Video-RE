@@ -1,0 +1,26 @@
+# Extracted firmware directories
+ipsw_extracted/
+unpacked_fw/
+
+# Build artifacts & output images
+custom_*.ipsw
+Firmware_rebuilt
+firmware_partition.bin
+*.bin
+*.fat
+*.bmp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+
+# OS / Editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
